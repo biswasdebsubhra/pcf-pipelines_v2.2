@@ -1,0 +1,178 @@
+groups: []
+jobs:
+- name: regulator
+  plan:
+  - get: schedule
+    trigger: true
+  - get: elastic-runtime
+    params:
+      globs: []
+- name: upload-and-stage-ert
+  plan:
+  - aggregate:
+    - do:
+      - get: pcf-pipelines-tarball
+      - config:
+          image_resource:
+            source:
+              repository: pcfnorm/rootfs
+              tag: 1.0.15
+            type: docker-image
+          inputs:
+          - name: pcf-pipelines-tarball
+          outputs:
+          - name: pcf-pipelines
+          platform: linux
+          run:
+            args:
+            - -c
+            - tar -xvf pcf-pipelines-tarball/*.tgz
+            path: bash
+        task: unpack-tarball
+    - get: pivnet-product
+      params:
+        globs:
+        - {{product_globs}}
+      passed:
+      - regulator
+      resource: elastic-runtime
+      trigger: true
+  - file: pcf-pipelines/tasks/wait-opsman-clear/task.yml
+    params:
+      OPSMAN_CLIENT_ID: {{opsman_client_id}}
+      OPSMAN_CLIENT_SECRET: {{opsman_client_secret}}
+      OPSMAN_DOMAIN_OR_IP_ADDRESS: {{opsman_domain_or_ip_address}}
+      OPSMAN_PASSWORD: {{opsman_admin_password}}
+      OPSMAN_USERNAME: {{opsman_admin_username}}
+    task: wait-opsman-clear
+  - file: pcf-pipelines/tasks/upload-product-and-stemcell/task.yml
+    params:
+      IAAS: {{iaas_type}}
+      NO_PROXY: ""
+      OM_IP: ""
+      OPS_MGR_PWD: {{opsman_admin_password}}
+      OPS_MGR_USR: {{opsman_admin_username}}
+      OPSMAN_CLIENT_ID: {{opsman_client_id}}
+      OPSMAN_CLIENT_SECRET: {{opsman_client_secret}}
+      OPSMAN_DOMAIN_OR_IP_ADDRESS: {{opsman_domain_or_ip_address}}
+      PIVNET_API_TOKEN: {{pivnet_token}}
+    task: upload-ert-and-stemcell
+  - file: pcf-pipelines/tasks/stage-product/task.yml
+    params:
+      OPSMAN_CLIENT_ID: {{opsman_client_id}}
+      OPSMAN_CLIENT_SECRET: {{opsman_client_secret}}
+      OPSMAN_DOMAIN_OR_IP_ADDRESS: {{opsman_domain_or_ip_address}}
+      OPSMAN_PASSWORD: {{opsman_admin_password}}
+      OPSMAN_USERNAME: {{opsman_admin_username}}
+    task: stage-tile
+  - file: pcf-pipelines/tasks/toggle-errands/task.yml
+    params:
+      ENABLE_ERRANDS: {{enable_errands}}
+      OPSMAN_CLIENT_ID: {{opsman_client_id}}
+      OPSMAN_CLIENT_SECRET: {{opsman_client_secret}}
+      OPSMAN_DOMAIN_OR_IP_ADDRESS: {{opsman_domain_or_ip_address}}
+      OPSMAN_PASSWORD: {{opsman_admin_password}}
+      OPSMAN_USERNAME: {{opsman_admin_username}}
+    task: toggle-errands
+- name: apply-changes
+  plan:
+  - aggregate:
+    - do:
+      - get: pcf-pipelines-tarball
+      - config:
+          image_resource:
+            source:
+              repository: pcfnorm/rootfs
+              tag: 1.0.15
+            type: docker-image
+          inputs:
+          - name: pcf-pipelines-tarball
+          outputs:
+          - name: pcf-pipelines
+          platform: linux
+          run:
+            args:
+            - -c
+            - tar -xvf pcf-pipelines-tarball/*.tgz
+            path: bash
+        task: unpack-tarball
+    - get: pivnet-product
+      params:
+        globs: []
+      passed:
+      - upload-and-stage-ert
+      resource: elastic-runtime
+      trigger: true
+  - file: pcf-pipelines/tasks/apply-changes/task.yml
+    params:
+      OPSMAN_CLIENT_ID: {{opsman_client_id}}
+      OPSMAN_CLIENT_SECRET: {{opsman_client_secret}}
+      OPSMAN_DOMAIN_OR_IP_ADDRESS: {{opsman_domain_or_ip_address}}
+      OPSMAN_PASSWORD: {{opsman_admin_password}}
+      OPSMAN_USERNAME: {{opsman_admin_username}}
+    task: apply-changes
+- name: delete-unused-products
+  plan:
+  - aggregate:
+    - do:
+      - get: pcf-pipelines-tarball
+      - config:
+          image_resource:
+            source:
+              repository: pcfnorm/rootfs
+              tag: 1.0.15
+            type: docker-image
+          inputs:
+          - name: pcf-pipelines-tarball
+          outputs:
+          - name: pcf-pipelines
+          platform: linux
+          run:
+            args:
+            - -c
+            - tar -xvf pcf-pipelines-tarball/*.tgz
+            path: bash
+        task: unpack-tarball
+  - file: pcf-pipelines/tasks/delete-unused-products/task.yml
+    params:
+      OPSMAN_CLIENT_ID: {{opsman_client_id}}
+      OPSMAN_CLIENT_SECRET: {{opsman_client_secret}}
+      OPSMAN_DOMAIN_OR_IP_ADDRESS: {{opsman_domain_or_ip_address}}
+      OPSMAN_PASSWORD: {{opsman_admin_password}}
+      OPSMAN_USERNAME: {{opsman_admin_username}}
+    task: delete-unused-products
+resource_types:
+- name: pivnet
+  source:
+    repository: pivotalcf/pivnet-resource
+    tag: latest-final
+  type: docker-image
+resources:
+- name: pcf-pipelines-tarball
+  source:
+    api_token: {{pivnet_token}}
+    product_slug: pcf-automation
+    product_version: v0.23.6
+  type: pivnet
+- name: elastic-runtime
+  source:
+    api_token: {{pivnet_token}}
+    product_slug: elastic-runtime
+    product_version: {{product_version_regex}}
+    sort_by: semver
+  type: pivnet
+- name: schedule
+  source:
+    days:
+    - Sunday
+    - Monday
+    - Tuesday
+    - Wednesday
+    - Thursday
+    - Friday
+    - Saturday
+    interval: 30m
+    location: America/Los_Angeles
+    start: 12:00 AM
+    stop: 11:59 PM
+  type: time
